@@ -863,10 +863,18 @@ function renderDomainCard(group) {
     </div>`;
   }).join('') + (extraCount > 0 ? buildOverflowChips(uniqueTabs.slice(8), urlCounts) : '');
 
+  // Encode unique tab URLs for the "save all" button
+  const uniqueUrlsEncoded = uniqueTabs.map(t => encodeURIComponent(t.url)).join(',');
+  const uniqueTitlesEncoded = uniqueTabs.map(t => encodeURIComponent(t.title || t.url)).join(',');
+
   let actionsHtml = `
     <button class="action-btn close-tabs" data-action="close-domain-tabs" data-domain-id="${stableId}">
       ${ICONS.close}
       Close all ${tabCount} tab${tabCount !== 1 ? 's' : ''}
+    </button>
+    <button class="action-btn save-tabs" data-action="save-all-domain-tabs" data-domain-id="${stableId}" data-tab-urls="${uniqueUrlsEncoded}" data-tab-titles="${uniqueTitlesEncoded}" title="Save all tabs for later, then close them">
+      ${ICONS.archive}
+      Save all &amp; close
     </button>`;
 
   if (hasDupes) {
@@ -1409,6 +1417,52 @@ document.addEventListener('click', async (e) => {
     }
 
     showToast('Closed duplicates, kept one copy each');
+    return;
+  }
+
+  // ---- Save all tabs in a domain group for later, then close them ----
+  if (action === 'save-all-domain-tabs') {
+    const urlsEncoded   = actionEl.dataset.tabUrls   || '';
+    const titlesEncoded = actionEl.dataset.tabTitles || '';
+    const urls   = urlsEncoded.split(',').map(u => decodeURIComponent(u)).filter(Boolean);
+    const titles = titlesEncoded.split(',').map(t => decodeURIComponent(t));
+
+    if (urls.length === 0) return;
+
+    // Save each tab to Saved for Later
+    for (let i = 0; i < urls.length; i++) {
+      await saveTabForLater({ url: urls[i], title: titles[i] || urls[i] });
+    }
+
+    // Close the tabs (use exact URL for landing/custom groups, hostname for regular)
+    const domainId = actionEl.dataset.domainId;
+    const group = domainGroups.find(g =>
+      'domain-' + g.domain.replace(/[^a-z0-9]/g, '-') === domainId
+    );
+    if (group) {
+      const groupUrls = group.tabs.map(t => t.url);
+      const useExact  = group.domain === '__landing-pages__' || !!group.label;
+      if (useExact) {
+        await closeTabsExact(groupUrls);
+      } else {
+        await closeTabsByUrls(groupUrls);
+      }
+      // Remove from in-memory groups
+      const idx = domainGroups.indexOf(group);
+      if (idx !== -1) domainGroups.splice(idx, 1);
+    }
+
+    if (card) {
+      playCloseSound();
+      animateCardOut(card);
+    }
+
+    // Update footer count
+    const statTabs = document.getElementById('statTabs');
+    if (statTabs) statTabs.textContent = openTabs.length;
+
+    showToast(`Saved ${urls.length} tab${urls.length !== 1 ? 's' : ''} for later`);
+    await renderDeferredColumn();
     return;
   }
 
