@@ -725,6 +725,191 @@ async function saveCollapsedDomains() {
 
 
 /* ----------------------------------------------------------------
+   DOMAIN ORDER — persisted in chrome.storage.local
+   Key: "domainOrder" → string[] of stableId values (user-dragged order)
+   ---------------------------------------------------------------- */
+let domainOrder = []; // ordered list of stableIds
+
+async function loadDomainOrder() {
+  const { domainOrder: saved = [] } = await chrome.storage.local.get('domainOrder');
+  domainOrder = saved;
+}
+
+async function saveDomainOrder() {
+  await chrome.storage.local.set({ domainOrder });
+}
+
+/**
+ * applyDomainOrder(groups)
+ *
+ * Re-sorts domainGroups according to the user's saved drag order.
+ * Groups not in the saved order (newly opened domains) are appended at the end.
+ */
+function applyDomainOrder(groups) {
+  if (domainOrder.length === 0) return groups;
+  const stableId = g => 'domain-' + g.domain.replace(/[^a-z0-9]/g, '-');
+  const ordered = [];
+  // Insert groups that appear in saved order first
+  for (const id of domainOrder) {
+    const g = groups.find(g => stableId(g) === id);
+    if (g) ordered.push(g);
+  }
+  // Append any new groups not yet in saved order
+  for (const g of groups) {
+    if (!ordered.includes(g)) ordered.push(g);
+  }
+  return ordered;
+}
+
+/**
+ * initDragSort(container)
+ *
+ * Attaches drag-and-drop listeners to the missions grid.
+ * Uses a ghost/placeholder approach:
+ *   - dragstart  → record dragged card
+ *   - dragover   → move placeholder to show drop position
+ *   - drop       → reorder DOM + persist
+ *   - dragend    → cleanup
+ */
+function initDragSort(container) {
+  if (!container) return;
+
+  let dragging  = null;   // the card element being dragged
+  let placeholder = null; // the visual drop-target indicator
+
+  function createPlaceholder() {
+    const el = document.createElement('div');
+    el.className = 'drag-placeholder';
+    return el;
+  }
+
+  container.addEventListener('dragstart', (e) => {
+    const card = e.target.closest('.mission-card');
+    if (!card) return;
+    dragging = card;
+    placeholder = createPlaceholder();
+    placeholder.style.height = card.offsetHeight + 'px';
+
+    // Slight delay so the placeholder doesn't flash before drag image renders
+    requestAnimationFrame(() => {
+      card.classList.add('dragging');
+      card.after(placeholder);
+    });
+    e.dataTransfer.effectAllowed = 'move';
+  });
+
+  container.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (!dragging || !placeholder) return;
+
+    const target = e.target.closest('.mission-card');
+    if (!target || target === dragging) return;
+
+    // Determine whether to insert before or after target
+    const rect = target.getBoundingClientRect();
+    const midY = rect.top + rect.height / 2;
+    if (e.clientY < midY) {
+      target.before(placeholder);
+    } else {
+      target.after(placeholder);
+    }
+  });
+
+  container.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    if (!dragging || !placeholder) return;
+
+    placeholder.replaceWith(dragging);
+    dragging.classList.remove('dragging');
+
+    // Sync domainGroups order to match the new DOM order
+    const cards = [...container.querySelectorAll('.mission-card[data-domain-id]')];
+    const newOrder = cards.map(c => c.dataset.domainId);
+    domainOrder = newOrder;
+    domainGroups = newOrder
+      .map(id => domainGroups.find(g => 'domain-' + g.domain.replace(/[^a-z0-9]/g, '-') === id))
+      .filter(Boolean);
+
+    await saveDomainOrder();
+    dragging = null;
+    placeholder = null;
+  });
+
+  container.addEventListener('dragend', () => {
+    if (placeholder) { placeholder.remove(); placeholder = null; }
+    if (dragging)    { dragging.classList.remove('dragging'); dragging = null; }
+  });
+}
+
+
+/* ----------------------------------------------------------------
+   DOMAIN COLOR LABELS — persisted in chrome.storage.local
+   Key: "domainColors" → { [stableId]: colorKey }
+   colorKey is one of: 'amber' | 'sage' | 'slate' | 'rose' | '' (default)
+   ---------------------------------------------------------------- */
+const COLOR_OPTIONS = [
+  { key: 'amber', label: 'Amber',  css: 'var(--accent-amber)' },
+  { key: 'sage',  label: 'Sage',   css: 'var(--accent-sage)'  },
+  { key: 'slate', label: 'Slate',  css: 'var(--accent-slate)' },
+  { key: 'rose',  label: 'Rose',   css: 'var(--accent-rose)'  },
+];
+
+let domainColors = {}; // { stableId: colorKey }
+
+async function loadDomainColors() {
+  const { domainColors: saved = {} } = await chrome.storage.local.get('domainColors');
+  domainColors = saved;
+}
+
+async function saveDomainColors() {
+  await chrome.storage.local.set({ domainColors });
+}
+
+function colorCssVar(colorKey) {
+  const opt = COLOR_OPTIONS.find(c => c.key === colorKey);
+  return opt ? opt.css : null;
+}
+
+
+/* ----------------------------------------------------------------
+   TAB CLOSE HISTORY — persisted in chrome.storage.local
+   Key: "closeHistory" →
+   {
+     byDay:   { "2026-04-16": 12, ... }   // tabs closed per day
+     byDomain:{ "github.com": 34, ... }   // all-time closes per domain
+   }
+   ---------------------------------------------------------------- */
+
+async function recordTabsClosed(tabs) {
+  if (!tabs || tabs.length === 0) return;
+  const today = new Date().toISOString().slice(0, 10); // "2026-04-16"
+  const { closeHistory: h = { byDay: {}, byDomain: {} } } =
+    await chrome.storage.local.get('closeHistory');
+
+  h.byDay[today] = (h.byDay[today] || 0) + tabs.length;
+  for (const tab of tabs) {
+    try {
+      const host = new URL(tab.url || '').hostname;
+      if (host) h.byDomain[host] = (h.byDomain[host] || 0) + 1;
+    } catch {}
+  }
+  // Keep only last 90 days in byDay to avoid unbounded growth
+  const cutoff = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
+  for (const day of Object.keys(h.byDay)) {
+    if (day < cutoff) delete h.byDay[day];
+  }
+  await chrome.storage.local.set({ closeHistory: h });
+}
+
+async function getCloseHistory() {
+  const { closeHistory: h = { byDay: {}, byDomain: {} } } =
+    await chrome.storage.local.get('closeHistory');
+  return h;
+}
+
+
+/* ----------------------------------------------------------------
    HELPER: filter out browser-internal pages
    ---------------------------------------------------------------- */
 
@@ -900,10 +1085,21 @@ function renderDomainCard(group) {
       </button>`;
   }
 
-  const isCollapsed = collapsedDomains.has(stableId);
+  const isCollapsed  = collapsedDomains.has(stableId);
+  const colorKey     = domainColors[stableId] || '';
+  const colorVar     = colorCssVar(colorKey);
+  // Color dots picker — one dot per color option, active = filled ring
+  const colorDots = COLOR_OPTIONS.map(c => `
+    <button class="color-dot color-dot-${c.key}${colorKey === c.key ? ' active' : ''}"
+      data-action="set-domain-color" data-domain-id="${stableId}" data-color="${c.key}"
+      title="${c.label}"></button>`).join('');
+  // "Clear" dot
+  const clearDot = `<button class="color-dot color-dot-clear${!colorKey ? ' active' : ''}"
+    data-action="set-domain-color" data-domain-id="${stableId}" data-color=""
+    title="Default"></button>`;
 
   return `
-    <div class="mission-card domain-card ${hasDupes ? 'has-amber-bar' : 'has-neutral-bar'}${isCollapsed ? ' is-collapsed' : ''}" data-domain-id="${stableId}">
+    <div class="mission-card domain-card ${hasDupes ? 'has-amber-bar' : (colorKey ? `has-color-bar has-${colorKey}-bar` : 'has-neutral-bar')}${isCollapsed ? ' is-collapsed' : ''}" data-domain-id="${stableId}" draggable="true"${colorVar ? ` style="--card-accent:${colorVar}"` : ''}>
       <div class="status-bar"></div>
       <div class="mission-content">
         <div class="mission-top" data-action="toggle-collapse" data-domain-id="${stableId}" style="cursor:pointer;" title="Click to collapse/expand">
@@ -913,6 +1109,7 @@ function renderDomainCard(group) {
           <span class="mission-name">${isLanding ? 'Homepages' : (group.label || friendlyDomain(group.domain))}</span>
           ${tabBadge}
           ${dupeBadge}
+          <div class="color-picker" title="Label color">${colorDots}${clearDot}</div>
         </div>
         <div class="mission-body">
           <div class="mission-pages">${pageChips}</div>
@@ -1058,6 +1255,8 @@ async function renderStaticDashboard() {
 
   // --- Load persisted collapsed state ---
   await loadCollapsedDomains();
+  await loadDomainOrder();
+  await loadDomainColors();
 
   // --- Fetch tabs ---
   await fetchOpenTabs();
@@ -1175,6 +1374,9 @@ async function renderStaticDashboard() {
     return b.tabs.length - a.tabs.length;
   });
 
+  // Apply user's custom drag order (if any)
+  domainGroups = applyDomainOrder(domainGroups);
+
   // --- Render domain cards ---
   const openTabsSection      = document.getElementById('openTabsSection');
   const openTabsMissionsEl   = document.getElementById('openTabsMissions');
@@ -1186,6 +1388,8 @@ async function renderStaticDashboard() {
     openTabsSectionCount.innerHTML = `${domainGroups.length} domain${domainGroups.length !== 1 ? 's' : ''} &nbsp;&middot;&nbsp; <button class="action-btn close-tabs" data-action="close-all-open-tabs" style="font-size:11px;padding:3px 10px;">${ICONS.close} Close all ${realTabs.length} tabs</button>`;
     openTabsMissionsEl.innerHTML = domainGroups.map(g => renderDomainCard(g)).join('');
     openTabsSection.style.display = 'block';
+    // Attach drag-sort listeners to the grid
+    initDragSort(openTabsMissionsEl);
   } else if (openTabsSection) {
     openTabsSection.style.display = 'none';
   }
@@ -1199,10 +1403,103 @@ async function renderStaticDashboard() {
 
   // --- Render "Saved for Later" column ---
   await renderDeferredColumn();
+
+  // --- Render footer stats + sparkline ---
+  await renderFooterStats();
 }
 
 async function renderDashboard() {
   await renderStaticDashboard();
+}
+
+
+/* ----------------------------------------------------------------
+   FOOTER STATS + SPARKLINE (features 9 & 11)
+   ---------------------------------------------------------------- */
+
+/**
+ * renderFooterStats()
+ *
+ * Reads close history and updates:
+ *   - "Closed today" stat
+ *   - "All time closed" stat
+ *   - 7-day sparkline SVG
+ */
+async function renderFooterStats() {
+  const h = await getCloseHistory();
+  const today = new Date().toISOString().slice(0, 10);
+
+  // --- Stat numbers ---
+  const closedToday = h.byDay[today] || 0;
+  const closedTotal = Object.values(h.byDay).reduce((s, v) => s + v, 0);
+
+  const elToday = document.getElementById('statClosedToday');
+  const elTotal = document.getElementById('statClosedTotal');
+  if (elToday) elToday.textContent = closedToday;
+  if (elTotal) elTotal.textContent = closedTotal;
+
+  // --- Sparkline: last 7 days ---
+  renderSparkline(h.byDay);
+}
+
+/**
+ * renderSparkline(byDay)
+ *
+ * Draws a minimal SVG polyline inside #sparkline for the last 7 days.
+ * Points use viewBox coords (0-120 wide, 0-32 tall, Y flipped).
+ */
+function renderSparkline(byDay) {
+  const svg = document.getElementById('sparkline');
+  if (!svg) return;
+
+  // Build last-7-days array [ { date, count } ]
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
+    days.push({ date: d, count: byDay[d] || 0 });
+  }
+
+  const counts = days.map(d => d.count);
+  const maxVal = Math.max(...counts, 1); // avoid division by zero
+  const W = 120, H = 32, pad = 3;
+
+  // Map data → SVG coordinates
+  const points = counts.map((v, i) => {
+    const x = pad + (i / (counts.length - 1)) * (W - pad * 2);
+    const y = H - pad - (v / maxVal) * (H - pad * 2);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+
+  // Area fill path (closes below the line)
+  const firstX = pad;
+  const lastX  = (W - pad).toFixed(1);
+  const areaD  = `M${firstX},${H - pad} ` +
+                 points.map((p, i) => (i === 0 ? `L${p}` : `L${p}`)).join(' ') +
+                 ` L${lastX},${H - pad} Z`;
+
+  svg.innerHTML = `
+    <defs>
+      <linearGradient id="sparkGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="var(--accent-amber)" stop-opacity="0.25"/>
+        <stop offset="100%" stop-color="var(--accent-amber)" stop-opacity="0"/>
+      </linearGradient>
+    </defs>
+    <path d="${areaD}" fill="url(#sparkGrad)" />
+    <polyline
+      points="${points.join(' ')}"
+      fill="none"
+      stroke="var(--accent-amber)"
+      stroke-width="1.5"
+      stroke-linejoin="round"
+      stroke-linecap="round"
+    />
+    ${counts.map((v, i) => {
+      const [x, y] = points[i].split(',');
+      return `<circle cx="${x}" cy="${y}" r="2" fill="var(--accent-amber)" opacity="0.7">
+        <title>${days[i].date}: ${v} closed</title>
+      </circle>`;
+    }).join('')}
+  `;
 }
 
 
@@ -1268,6 +1565,41 @@ document.addEventListener('click', async (e) => {
     return;
   }
 
+  // ---- Set domain card color label ----
+  if (action === 'set-domain-color') {
+    e.stopPropagation(); // don't trigger toggle-collapse
+    const domainId = actionEl.dataset.domainId;
+    const color    = actionEl.dataset.color; // '' = clear
+    if (!domainId) return;
+
+    if (color) {
+      domainColors[domainId] = color;
+    } else {
+      delete domainColors[domainId];
+    }
+    await saveDomainColors();
+
+    // Update card in-place without full re-render
+    const cardEl = document.querySelector(`.mission-card[data-domain-id="${domainId}"]`);
+    if (cardEl) {
+      const colorVar = colorCssVar(color);
+      // Update top border color
+      cardEl.classList.remove('has-color-bar', 'has-amber-bar', 'has-sage-bar', 'has-slate-bar', 'has-rose-bar', 'has-neutral-bar');
+      if (color) {
+        cardEl.classList.add('has-color-bar', `has-${color}-bar`);
+        cardEl.style.setProperty('--card-accent', colorVar);
+      } else {
+        cardEl.classList.add('has-neutral-bar');
+        cardEl.style.removeProperty('--card-accent');
+      }
+      // Update active dot
+      cardEl.querySelectorAll('.color-dot').forEach(dot => {
+        dot.classList.toggle('active', dot.dataset.color === color);
+      });
+    }
+    return;
+  }
+
   // ---- Focus a specific tab ----
   if (action === 'focus-tab') {
     const tabUrl = actionEl.dataset.tabUrl;
@@ -1284,7 +1616,10 @@ document.addEventListener('click', async (e) => {
     // Close the tab in Chrome directly
     const allTabs = await chrome.tabs.query({});
     const match   = allTabs.find(t => t.url === tabUrl);
-    if (match) await chrome.tabs.remove(match.id);
+    if (match) {
+      await recordTabsClosed([match]);
+      await chrome.tabs.remove(match.id);
+    }
     await fetchOpenTabs();
 
     playCloseSound();
@@ -1423,6 +1758,7 @@ document.addEventListener('click', async (e) => {
     if (idx !== -1) domainGroups.splice(idx, 1);
 
     const groupLabel = group.domain === '__landing-pages__' ? 'Homepages' : (group.label || friendlyDomain(group.domain));
+    await recordTabsClosed(group.tabs);
     showToast(`Closed ${urls.length} tab${urls.length !== 1 ? 's' : ''} from ${groupLabel}`);
 
     const statTabs = document.getElementById('statTabs');
@@ -1514,9 +1850,9 @@ document.addEventListener('click', async (e) => {
 
   // ---- Close ALL open tabs ----
   if (action === 'close-all-open-tabs') {
-    const allUrls = openTabs
-      .filter(t => t.url && !t.url.startsWith('chrome') && !t.url.startsWith('about:'))
-      .map(t => t.url);
+    const tabsToClose = openTabs.filter(t => t.url && !t.url.startsWith('chrome') && !t.url.startsWith('about:'));
+    const allUrls = tabsToClose.map(t => t.url);
+    await recordTabsClosed(tabsToClose);
     await closeTabsByUrls(allUrls);
     playCloseSound();
 

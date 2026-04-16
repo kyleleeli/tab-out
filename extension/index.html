@@ -113,9 +113,24 @@
         <div class="stat-num" id="statTabs">—</div>
         <div class="stat-label">Open tabs</div>
       </div>
+      <div class="stat">
+        <div class="stat-num" id="statClosedToday">—</div>
+        <div class="stat-label">Closed today</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num" id="statClosedTotal">—</div>
+        <div class="stat-label">All time closed</div>
+      </div>
     </div>
-    <div class="last-refresh">
-      <span style="color: var(--muted); font-size: 11px;"><a href="https://github.com/zarazhangrui/tab-out" target="_top" style="color: var(--muted); text-decoration: underline; text-underline-offset: 2px;">Tab Out</a> by <a href="https://x.com/zarazhangrui" target="_top" style="color: var(--muted); text-decoration: underline; text-underline-offset: 2px;">Zara</a></span>
+    <div class="footer-right">
+      <!-- Sparkline: 7-day tab close trend -->
+      <div class="sparkline-wrap">
+        <svg id="sparkline" class="sparkline" viewBox="0 0 120 32" preserveAspectRatio="none"></svg>
+        <div class="sparkline-label">7-day closes</div>
+      </div>
+      <div class="last-refresh">
+        <span style="color: var(--muted); font-size: 11px;"><a href="https://github.com/zarazhangrui/tab-out" target="_top" style="color: var(--muted); text-decoration: underline; text-underline-offset: 2px;">Tab Out</a> by <a href="https://x.com/zarazhangrui" target="_top" style="color: var(--muted); text-decoration: underline; text-underline-offset: 2px;">Zara</a></span>
+      </div>
     </div>
   </footer>
 

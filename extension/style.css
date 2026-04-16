@@ -349,6 +349,39 @@ header {
   display: none !important;
 }
 
+/* ---- Drag & drop ---- */
+
+/* Card being dragged — ghost stays semi-transparent */
+.mission-card.dragging {
+  opacity: 0.35;
+  cursor: grabbing;
+}
+
+/* Drag handle cursor on the whole card */
+.mission-card[draggable="true"] {
+  cursor: grab;
+}
+
+/* Don't show grab cursor on interactive elements inside the card */
+.mission-card[draggable="true"] button,
+.mission-card[draggable="true"] a,
+.mission-card[draggable="true"] input,
+.mission-card[draggable="true"] .page-chip {
+  cursor: auto;
+}
+.mission-card[draggable="true"] button { cursor: pointer; }
+.mission-card[draggable="true"] .page-chip.clickable { cursor: pointer; }
+
+/* Drop target placeholder — dashed outline, same height as dragged card */
+.drag-placeholder {
+  border: 2px dashed var(--accent-amber);
+  border-radius: 8px;
+  background: rgba(200, 113, 58, 0.04);
+  break-inside: avoid;
+  margin-bottom: 12px;
+  transition: height 0.15s ease;
+}
+
 /* ---- Collapse chevron ---- */
 .collapse-chevron {
   width: 14px;
@@ -711,7 +744,87 @@ footer {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
 }
+
+.footer-right {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+/* ---- Sparkline (feature 11) ---- */
+.sparkline-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.sparkline {
+  width: 120px;
+  height: 32px;
+  display: block;
+  overflow: visible;
+}
+
+.sparkline-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--muted);
+  opacity: 0.7;
+}
+
+/* ---- Color picker in card header (feature 7) ---- */
+.color-picker {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.mission-top:hover .color-picker,
+.mission-card:focus-within .color-picker {
+  opacity: 1;
+}
+
+.color-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  transition: transform 0.15s, border-color 0.15s;
+}
+
+.color-dot:hover { transform: scale(1.2); }
+
+.color-dot-amber { background: var(--accent-amber); }
+.color-dot-sage  { background: var(--accent-sage);  }
+.color-dot-slate { background: var(--accent-slate); }
+.color-dot-rose  { background: var(--accent-rose);  }
+.color-dot-clear {
+  background: var(--warm-gray);
+  border-color: var(--muted);
+  opacity: 0.5;
+}
+
+.color-dot.active {
+  border-color: var(--ink);
+  transform: scale(1.15);
+}
+
+/* Dynamic color bar via CSS custom property --card-accent */
+.mission-card.has-color-bar::before { background: var(--card-accent, var(--warm-gray)); }
+.mission-card.has-sage-bar::before  { background: var(--accent-sage);  }
+.mission-card.has-slate-bar::before { background: var(--accent-slate); }
+.mission-card.has-rose-bar::before  { background: var(--accent-rose);  }
 
 .footer-stats {
   display: flex;
