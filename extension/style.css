@@ -349,6 +349,33 @@ header {
   display: none !important;
 }
 
+/* ---- Collapse chevron ---- */
+.collapse-chevron {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--muted);
+  transition: transform 0.2s ease;
+  margin-right: 2px;
+}
+
+.mission-card.is-collapsed .collapse-chevron {
+  transform: rotate(-90deg);
+}
+
+/* ---- Collapsible body (pages + actions) ---- */
+.mission-body {
+  overflow: hidden;
+  transition: max-height 0.25s ease, opacity 0.2s ease;
+  max-height: 2000px;
+  opacity: 1;
+}
+
+.mission-card.is-collapsed .mission-body {
+  max-height: 0;
+  opacity: 0;
+}
+
 /* Old side status bar — hidden, replaced by top border via ::before */
 .status-bar {
   display: none;

@@ -708,6 +708,21 @@ const ICONS = {
    ---------------------------------------------------------------- */
 let domainGroups = [];
 
+/* ----------------------------------------------------------------
+   COLLAPSED DOMAINS — persisted in chrome.storage.local
+   Key: "collapsedDomains" → string[] of stableId values
+   ---------------------------------------------------------------- */
+let collapsedDomains = new Set();
+
+async function loadCollapsedDomains() {
+  const { collapsedDomains: saved = [] } = await chrome.storage.local.get('collapsedDomains');
+  collapsedDomains = new Set(saved);
+}
+
+async function saveCollapsedDomains() {
+  await chrome.storage.local.set({ collapsedDomains: [...collapsedDomains] });
+}
+
 
 /* ----------------------------------------------------------------
    HELPER: filter out browser-internal pages
@@ -885,17 +900,24 @@ function renderDomainCard(group) {
       </button>`;
   }
 
+  const isCollapsed = collapsedDomains.has(stableId);
+
   return `
-    <div class="mission-card domain-card ${hasDupes ? 'has-amber-bar' : 'has-neutral-bar'}" data-domain-id="${stableId}">
+    <div class="mission-card domain-card ${hasDupes ? 'has-amber-bar' : 'has-neutral-bar'}${isCollapsed ? ' is-collapsed' : ''}" data-domain-id="${stableId}">
       <div class="status-bar"></div>
       <div class="mission-content">
-        <div class="mission-top">
+        <div class="mission-top" data-action="toggle-collapse" data-domain-id="${stableId}" style="cursor:pointer;" title="Click to collapse/expand">
+          <svg class="collapse-chevron" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+          </svg>
           <span class="mission-name">${isLanding ? 'Homepages' : (group.label || friendlyDomain(group.domain))}</span>
           ${tabBadge}
           ${dupeBadge}
         </div>
-        <div class="mission-pages">${pageChips}</div>
-        <div class="actions">${actionsHtml}</div>
+        <div class="mission-body">
+          <div class="mission-pages">${pageChips}</div>
+          <div class="actions">${actionsHtml}</div>
+        </div>
       </div>
       <div class="mission-meta">
         <div class="mission-page-count">${tabCount}</div>
@@ -1033,6 +1055,9 @@ async function renderStaticDashboard() {
   const dateEl     = document.getElementById('dateDisplay');
   if (greetingEl) greetingEl.textContent = getGreeting();
   if (dateEl)     dateEl.textContent     = getDateDisplay();
+
+  // --- Load persisted collapsed state ---
+  await loadCollapsedDomains();
 
   // --- Fetch tabs ---
   await fetchOpenTabs();
@@ -1219,6 +1244,27 @@ document.addEventListener('click', async (e) => {
       overflowContainer.style.display = 'contents';
       actionEl.remove();
     }
+    return;
+  }
+
+  // ---- Toggle collapse a domain card ----
+  if (action === 'toggle-collapse') {
+    // Don't collapse when clicking a badge/button inside mission-top
+    if (e.target.closest('button') || e.target.closest('a')) return;
+
+    const domainId = actionEl.dataset.domainId;
+    if (!domainId) return;
+
+    const cardEl = document.querySelector(`.mission-card[data-domain-id="${domainId}"]`);
+    if (!cardEl) return;
+
+    const isNowCollapsed = cardEl.classList.toggle('is-collapsed');
+    if (isNowCollapsed) {
+      collapsedDomains.add(domainId);
+    } else {
+      collapsedDomains.delete(domainId);
+    }
+    await saveCollapsedDomains();
     return;
   }
 
