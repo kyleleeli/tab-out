@@ -2077,3 +2077,47 @@ document.addEventListener('keydown', (e) => {
    INITIALIZE
    ---------------------------------------------------------------- */
 renderDashboard();
+
+/* ----------------------------------------------------------------
+   AUTO-REFRESH — re-render when tabs change in Chrome
+
+   Uses a debounce so rapid tab events (e.g. opening 5 tabs at once)
+   only trigger one redraw. Preserves the current search query so the
+   filter stays active after the refresh.
+   ---------------------------------------------------------------- */
+
+let refreshTimer = null;
+
+function scheduleRefresh() {
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(async () => {
+    // Remember current search query before re-render wipes the DOM
+    const searchInput = document.getElementById('tabSearch');
+    const currentQuery = searchInput?.value || '';
+
+    await renderDashboard();
+
+    // Re-apply search filter if the user had one active
+    if (currentQuery) {
+      const newInput = document.getElementById('tabSearch');
+      if (newInput) newInput.value = currentQuery;
+      applySearch(currentQuery);
+    }
+  }, 300); // 300ms debounce — feels instant but batches burst events
+}
+
+// Tab opened
+chrome.tabs.onCreated.addListener(scheduleRefresh);
+
+// Tab closed
+chrome.tabs.onRemoved.addListener(scheduleRefresh);
+
+// Tab navigated to a new URL (catches chrome:// ↔ web transitions too)
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  // Only re-render when the URL or title actually changed, not on every loading state
+  if (changeInfo.url || changeInfo.title) scheduleRefresh();
+});
+
+// Tab moved between windows
+chrome.tabs.onAttached.addListener(scheduleRefresh);
+chrome.tabs.onDetached.addListener(scheduleRefresh);
