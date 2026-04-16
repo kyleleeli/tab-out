@@ -1477,6 +1477,167 @@ document.addEventListener('input', async (e) => {
 
 
 /* ----------------------------------------------------------------
+   SEARCH — filter domain cards by tab title or domain name
+   ---------------------------------------------------------------- */
+
+/**
+ * applySearch(query)
+ *
+ * Filters visible domain cards based on the search query.
+ * - Matches against each tab's title and URL within the card.
+ * - Cards with at least one matching tab are shown; others are hidden.
+ * - Matching text inside chip labels is highlighted with <mark>.
+ * - Updates the section count to show "X of Y domains".
+ */
+function applySearch(query) {
+  const q = query.trim().toLowerCase();
+  const cards = document.querySelectorAll('#openTabsMissions .mission-card');
+  const countEl = document.getElementById('openTabsSectionCount');
+  let visibleCount = 0;
+  const totalCount = domainGroups.length;
+
+  cards.forEach(card => {
+    if (!q) {
+      // No query — restore everything
+      card.classList.remove('search-hidden');
+      // Remove any highlights
+      card.querySelectorAll('.chip-text').forEach(el => {
+        el.innerHTML = el.textContent;
+      });
+      visibleCount++;
+      return;
+    }
+
+    // Check if the domain label matches
+    const domainLabel = card.querySelector('.mission-name')?.textContent?.toLowerCase() || '';
+    // Check if any tab chip matches
+    const chips = card.querySelectorAll('.page-chip[data-action="focus-tab"]');
+    let cardMatches = domainLabel.includes(q);
+
+    chips.forEach(chip => {
+      const textEl = chip.querySelector('.chip-text');
+      if (!textEl) return;
+      const rawText = textEl.textContent;
+      const tabUrl  = chip.dataset.tabUrl || '';
+      if (rawText.toLowerCase().includes(q) || tabUrl.toLowerCase().includes(q)) {
+        cardMatches = true;
+      }
+    });
+
+    if (cardMatches) {
+      card.classList.remove('search-hidden');
+      visibleCount++;
+      // Highlight matched text in chip labels
+      chips.forEach(chip => {
+        const textEl = chip.querySelector('.chip-text');
+        if (!textEl) return;
+        const raw = textEl.textContent;
+        const idx = raw.toLowerCase().indexOf(q);
+        if (idx !== -1) {
+          textEl.innerHTML =
+            escapeHtml(raw.slice(0, idx)) +
+            `<mark class="search-highlight">${escapeHtml(raw.slice(idx, idx + q.length))}</mark>` +
+            escapeHtml(raw.slice(idx + q.length));
+        } else {
+          textEl.innerHTML = escapeHtml(raw);
+        }
+      });
+    } else {
+      card.classList.add('search-hidden');
+      // Clear stale highlights on hidden cards
+      chips.forEach(chip => {
+        const textEl = chip.querySelector('.chip-text');
+        if (textEl) textEl.innerHTML = escapeHtml(textEl.textContent);
+      });
+    }
+  });
+
+  // Update section count
+  if (countEl) {
+    if (q) {
+      const closeAllBtn = countEl.querySelector('button[data-action="close-all-open-tabs"]');
+      const btnHtml = closeAllBtn ? closeAllBtn.outerHTML : '';
+      countEl.innerHTML =
+        `<span class="search-result-hint">${visibleCount}</span> of ${totalCount} domain${totalCount !== 1 ? 's' : ''} &nbsp;&middot;&nbsp; ${btnHtml}`;
+    } else {
+      // Restore original count rendering
+      const realTabs = getRealTabs();
+      countEl.innerHTML = `${totalCount} domain${totalCount !== 1 ? 's' : ''} &nbsp;&middot;&nbsp; <button class="action-btn close-tabs" data-action="close-all-open-tabs" style="font-size:11px;padding:3px 10px;">${ICONS.close} Close all ${realTabs.length} tabs</button>`;
+    }
+  }
+}
+
+/**
+ * focusFirstSearchResult()
+ *
+ * Jumps to the first visible tab that matches the current search query.
+ */
+async function focusFirstSearchResult() {
+  const q = document.getElementById('tabSearch')?.value.trim().toLowerCase();
+  if (!q) return;
+
+  const firstCard = document.querySelector('#openTabsMissions .mission-card:not(.search-hidden)');
+  if (!firstCard) return;
+
+  // Find the first matching chip in that card
+  const chips = firstCard.querySelectorAll('.page-chip[data-action="focus-tab"]');
+  for (const chip of chips) {
+    const textEl = chip.querySelector('.chip-text');
+    const tabUrl  = chip.dataset.tabUrl || '';
+    if (
+      (textEl && textEl.textContent.toLowerCase().includes(q)) ||
+      tabUrl.toLowerCase().includes(q)
+    ) {
+      await focusTab(tabUrl);
+      return;
+    }
+  }
+  // Fallback: focus first tab in first matching card
+  const firstChip = firstCard.querySelector('.page-chip[data-action="focus-tab"]');
+  if (firstChip?.dataset.tabUrl) await focusTab(firstChip.dataset.tabUrl);
+}
+
+function escapeHtml(str) {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// ---- Wire up search input ----
+document.addEventListener('DOMContentLoaded', () => {
+  const input = document.getElementById('tabSearch');
+  if (!input) return;
+
+  // Real-time filtering
+  input.addEventListener('input', () => applySearch(input.value));
+
+  // Enter → jump to first result; Escape → clear
+  input.addEventListener('keydown', async (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      await focusFirstSearchResult();
+    }
+    if (e.key === 'Escape') {
+      input.value = '';
+      applySearch('');
+      input.blur();
+    }
+  });
+});
+
+// ---- "/" key to focus search (when not typing in another input) ----
+document.addEventListener('keydown', (e) => {
+  if (e.key !== '/') return;
+  const tag = document.activeElement?.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+  e.preventDefault();
+  document.getElementById('tabSearch')?.focus();
+});
+
+
+/* ----------------------------------------------------------------
    INITIALIZE
    ---------------------------------------------------------------- */
 renderDashboard();
